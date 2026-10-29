@@ -1,0 +1,94 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default-deny catch-all (Pillar 4: Global Safety Net)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Health / connection test document
+    match /test/{docId} {
+      allow read: if true;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email in ['rodrigo.trovo.01@gmail.com', 'trovoepson@gmail.com'] ||
+        (request.auth.token.email != null && request.auth.token.email.matches('.*@epson.*')) ||
+        request.auth.token.email_verified == true ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Validations for Lead
+    function isValidLead(data) {
+      return data.keys().hasAll(['name', 'email', 'phone']) &&
+             data.keys().hasOnly(['name', 'email', 'phone', 'company', 'state', 'createdAt', 'lastActivityAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 150 &&
+             data.email is string && data.email.size() > 0 && data.email.size() <= 150 &&
+             data.phone is string && data.phone.size() > 0 && data.phone.size() <= 50 &&
+             (!('company' in data) || (data.company is string && data.company.size() <= 150)) &&
+             (!('state' in data) || (data.state is string && data.state.size() <= 10)) &&
+             (!('createdAt' in data) || data.createdAt is timestamp || data.createdAt is string) &&
+             (!('lastActivityAt' in data) || data.lastActivityAt is timestamp || data.lastActivityAt is string);
+    }
+
+    // Validations for Opportunity
+    function isValidOpportunity(data) {
+      return data.keys().hasAll(['clientName', 'clientEmail', 'printerModel', 'termMonths', 'monthlyInstallment']) &&
+             data.keys().hasOnly([
+               'clientName', 'clientEmail', 'clientPhone', 'clientCompany', 'destinationUf',
+               'printerModel', 'termMonths', 'monthlyInstallment', 'financedBase', 'hwNet',
+               'marginPercent', 'difalPercent', 'monthlyProductionM2', 'status', 'notes',
+               'createdAt', 'updatedAt'
+             ]) &&
+             data.clientName is string && data.clientName.size() > 0 && data.clientName.size() <= 150 &&
+             data.clientEmail is string && data.clientEmail.size() > 0 && data.clientEmail.size() <= 150 &&
+             (!('clientPhone' in data) || (data.clientPhone is string && data.clientPhone.size() <= 50)) &&
+             (!('clientCompany' in data) || (data.clientCompany is string && data.clientCompany.size() <= 150)) &&
+             (!('destinationUf' in data) || (data.destinationUf is string && data.destinationUf.size() <= 10)) &&
+             data.printerModel is string && data.printerModel.size() > 0 && data.printerModel.size() <= 50 &&
+             data.termMonths is number && data.termMonths > 0 && data.termMonths <= 120 &&
+             data.monthlyInstallment is number && data.monthlyInstallment >= 0 &&
+             (!('financedBase' in data) || data.financedBase is number) &&
+             (!('hwNet' in data) || data.hwNet is number) &&
+             (!('marginPercent' in data) || data.marginPercent is number) &&
+             (!('difalPercent' in data) || data.difalPercent is number) &&
+             (!('monthlyProductionM2' in data) || data.monthlyProductionM2 is number) &&
+             (!('status' in data) || (data.status is string && data.status.size() <= 50)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000)) &&
+             (!('createdAt' in data) || data.createdAt is timestamp || data.createdAt is string) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp || data.updatedAt is string);
+    }
+
+    // Leads collection
+    match /leads/{leadId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(leadId) && isValidLead(request.resource.data);
+      allow delete: if isValidId(leadId);
+    }
+
+    // Opportunities collection
+    match /opportunities/{opportunityId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(opportunityId) && isValidOpportunity(request.resource.data);
+      allow delete: if isValidId(opportunityId);
+    }
+
+    // Admins collection (Optional RBAC lookup)
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}
